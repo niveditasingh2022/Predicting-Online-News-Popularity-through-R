@@ -1,0 +1,317 @@
+#  Solution for Data Analysis on ** Online News Popularity**
+```{r include=FALSE}
+library(readr)
+library(dplyr)
+library(corrplot)
+library(caret)
+library(caTools)
+library(randomForest)
+```
+# Task 1 : Data Exploration -----
+```{r}
+# Read the dataset from the provided URL
+url <- "E:/Solution_Data_Ana_Assignment/Advanced Data Analysis/Assignment/OnlineNewsPopularityDataset.csv"
+data <- read.csv(url)
+
+# Display the first few rows of the dataset
+head(data)
+
+# Descriptive statistics of all features "Predictors"
+summary(data)
+
+# Features correlation (excluding the url column)
+correlation_matrix <- cor(data[, -1])  
+corrplot(correlation_matrix, method = "square", type = "lower", tl.col = "black", tl.srt = 45)
+
+# showing only specific columns header from the dataset
+selected_columns <- c("n_tokens_title", "n_tokens_content", "num_imgs", "global_subjectivity", "global_sentiment_polarity", "shares")
+
+selected_correlation_matrix <- correlation_matrix[selected_columns, selected_columns]
+
+corrplot(selected_correlation_matrix, method = "square", type = "lower", tl.col = "black", tl.srt = 45)
+
+# showing the heatmap with only numeric data
+numeric_data <- select(data, where(is.numeric))
+correlation_matrix <- cor(numeric_data)
+heatmap(correlation_matrix, symm = TRUE)
+```
+# Task 1 ends here-----
+# Task 2 Building a Regression Model
+# Feature Preprocessing
+```{r}
+# Read the dataset from the provided URL
+url <- "E:/Solution_Data_Ana_Assignment/Advanced Data Analysis/Assignment/OnlineNewsPopularityDataset.csv"
+data <- read.csv(url)
+# Features preprocessing (check for missing values)
+missing_values <- colSums(is.na(data))
+print(missing_values)
+#Removing outlier
+data=data[!data$n_non_stop_words==1042,]
+summary(data)
+#Removing non predictive variables 
+#data <- subset( data, select = -c(url ,is_weekend ) )
+
+# Combining Plots (Plot1) for visual analysis
+par(mfrow=c(2,2))
+for(i in 2:length(data)){hist(data[,i],
+                              xlab=names(data)[i] , main = paste("[" , i , "]" ,
+                                                                 "Histogram of", names(data)[i])  )}
+#Converting categorical values from numeric to factor - Weekdays
+for (i in 31:37){
+  data[,i] <- factor(data[,i])
+  
+}
+
+#Converting categorical values from numeric to factor - News subjects
+for (i in 13:18){
+  data[,i] <- factor(data[,i])
+}
+
+#check classes of data after transformation
+sapply(data, class)
+# Showing another plots (Plots2) for shares 
+#Checking importance of news subjects(categorical) on shares
+for (i in 13:18){
+  
+  boxplot(log(data$shares) ~ (data[,i]), xlab=names(data)[i] , ylab="shares")
+}
+
+#Checking importance of weekdays on news shares
+for (i in 31:37){
+  
+  boxplot(log(data$shares) ~ (data[,i]), xlab=names(data)[i] , ylab="shares")
+}
+# Implementing 3rd problem (training/testing) of second task
+#Taking important variables
+###########################
+
+d2 <- subset( data, select = c(n_tokens_title,timedelta, kw_avg_avg, self_reference_min_shares,
+                             kw_min_avg, num_hrefs, kw_max_max, avg_negative_polarity,
+                             data_channel_is_entertainment, weekday_is_monday, 
+                             LDA_02, kw_min_max, average_token_length, global_subjectivity,
+                             kw_max_min, global_rate_positive_words, 
+                             n_tokens_content, n_non_stop_unique_tokens,
+                             min_positive_polarity, weekday_is_saturday,
+                             data_channel_is_lifestyle, kw_avg_max,
+                             kw_avg_min, title_sentiment_polarity,
+                             num_self_hrefs, self_reference_max_shares,
+                             n_tokens_title, LDA_01, kw_min_min, shares) )
+
+summary(d2$shares)
+dim(d2)
+
+#########################################################
+# Sampling the dataset based on best variables
+#############################################################
+splitdata<- sample.split(d2,SplitRatio = 0.7)
+traindata <- subset(d2, splitdata == TRUE)
+testdata <- subset(d2, splitdata == FALSE)
+
+# Now, we fit a model with all the variables;
+fit_lmbest <- lm(shares ~ ., data = traindata)
+#plot(fit_lm) # uncomment this
+summary(fit_lmbest)
+plot(fit_lmbest)            
+# Now, we fit a model with all the variables;
+# Fit a model with all the variables
+# Fit a model with all the variables
+fit_lmbest <- lm(shares ~ ., data = traindata)
+
+# Checking CV singularity issues
+fit_lm_updated <- lm(shares ~ . - n_tokens_title.1 - LDA_01 - kw_avg_min, data = traindata)
+summary(fit_lm_updated)
+# Check for any missing or nonfinite value in train data
+any(is.na(traindata))
+
+library(boot)
+
+######################################################### Cross validation learning curve ############
+#Cross validation
+#Selected Input Variables
+
+# Selected input variables
+selected_variables <- c("n_tokens_title", "timedelta", "kw_avg_avg", "self_reference_min_shares",
+                        "kw_min_avg", "num_hrefs", "kw_max_max", "avg_negative_polarity",
+                        "data_channel_is_entertainment", "weekday_is_monday", 
+                        "LDA_02", "kw_min_max", "average_token_length", "global_subjectivity",
+                        "kw_max_min", "global_rate_positive_words", 
+                        "n_tokens_content", "n_non_stop_unique_tokens",
+                        "min_positive_polarity", "weekday_is_saturday",
+                        "data_channel_is_lifestyle", "kw_avg_max",
+                        "kw_avg_min", "title_sentiment_polarity",
+                        "num_self_hrefs", "self_reference_max_shares",
+                        "n_tokens_title", "LDA_01", "kw_min_min")
+
+# Constructing the formula string
+formulaString <- paste("shares ~", paste(selected_variables, collapse = " + "))
+best_mse <- Inf
+best_model_cv <- NULL
+# Define the chunk size (K fold)
+chunksize <- nrow(traindata) %/% 10
+
+# Create an empty dataframe to store the results
+learnings <- data.frame(dfsize = integer(10), mse = numeric(10))
+
+# Loop through different chunk sizes
+for (i in seq(1, 10)) {
+  # Determine the size of the training dataset
+  train_size <- i * chunksize + 3
+  
+  # Fit the linear regression model
+  lm_model <- lm(as.formula(formulaString), data = traindata[1:train_size, ])
+  
+  # Make predictions on the test dataset
+  predictions <- predict(lm_model, newdata = testdata)
+  
+  # Calculate mean squared error (MSE)
+  mse <- mean((predictions - testdata$shares)^2)
+  
+  # Store the results
+  learnings[i, ] <- list(train_size, mse)
+  # Update the best model if a lower MSE is found
+  if (mse < best_mse) {
+    best_mse <- mse
+    best_model_cv <- lm_model
+  }
+}
+
+# Print the results
+print(learnings)
+print(learnings$dfsize)
+
+# Plot the learning curve
+plot(learnings$dfsize, learnings$mse, type = "o", main = "Learning Curve (Cross validation)", xlab = "Data Chunk Size (K)", ylab = "Mean Squared Error (MSE)")
+
+###################################################### Ending Solution for CV ###############################
+# Bootstrapping
+boot_model <- boot(traindata, function(data, index) {
+  fit <- lm(shares ~ ., data = data[index, ])
+  return(coef(fit))
+}, R = 100)
+boot_model
+
+
+############# Implementing Task 3 (first) ###########################################
+# Extracting coefficients from the linear regression model
+coefficients <- coef(fit_lmbest)[-1]  # Exclude intercept term
+
+# Getting the names of the features
+feature_names <- names(coefficients)
+
+# Creating a data frame to store feature names and their coefficients
+feature_importance <- data.frame(Feature = feature_names, Coefficient = coefficients)
+
+# Sorting the features based on their absolute coefficient values
+feature_importance <- feature_importance[order(abs(feature_importance$Coefficient), decreasing = TRUE), ]
+
+# Displaying the top features
+top_features <- head(feature_importance, 10)  # Adjust the number of top features as needed
+print(top_features)
+
+# Implementing Task 3 (second)
+# Predicting the target variable (shares) using the test data
+predictions <- predict(fit_lmbest, newdata = testdata)
+
+# Calculating Mean Squared Error (MSE)
+mse <- mean((testdata$shares - predictions)^2)
+
+# Calculating R-squared (R^2)
+rsquared <- cor(predictions, testdata$shares)^2
+
+# Calculating Mean Absolute Error (MAE)
+mae <- mean(abs(testdata$shares - predictions))
+
+# Calculating Mean Absolute Percentage Error (MAPE)
+mape <- mean(abs((testdata$shares - predictions) / testdata$shares)) * 100
+
+# Calculating Mean Percentage Error (MPE)
+mpe <- mean((testdata$shares - predictions) / testdata$shares) * 100
+
+# Displaying the performance metrics
+cat("Mean Squared Error (MSE):", mse, "\n")
+cat("R-squared (R^2):", rsquared, "\n")
+cat("Mean Absolute Error (MAE):", mae, "\n")
+cat("Mean Absolute Percentage Error (MAPE):", mape, "%\n")
+cat("Mean Percentage Error (MPE):", mpe, "%\n")
+
+ ############# Implementing Task 3 (Third) ###################################
+# Fitting alternative regression models
+fit_lm_alternative <- lm(shares ~ n_tokens_title + n_tokens_content + global_subjectivity, data = traindata)
+
+# Performing ANOVA to compare the models
+anova_result <- anova(fit_lmbest, fit_lm_alternative)
+
+# Displaying the ANOVA table
+# ----------------------------
+print(anova_result)
+############# Implementing Task 3 (Fourth)
+# Comparing performance among best models of training/testing, cross-validation, and bootstrapping paradigms
+# Best model from training/testing paradigm
+best_model_training_testing <- fit_lmbest
+if (!is.null(boot_model)) {
+  boot_model_median_coef <- apply(boot_model$t, 2, median)
+  best_model_bootstrapping <- fit_lmbest
+  attributes(best_model_bootstrapping)$coefficients <- boot_model_median_coef
+} else {
+  best_model_bootstrapping <- NULL
+}
+
+# Predictions from the best models
+predictions_training_testing <- predict(best_model_training_testing, newdata = testdata)
+predictions_cv <- if (!is.null(best_model_cv)) predict(best_model_cv, newdata = testdata) else NULL
+predictions_bootstrapping <- if (!is.null(best_model_bootstrapping)) predict(best_model_bootstrapping, newdata = testdata) else NULL
+
+# Calculating performance metrics for each model
+mse_training_testing <- mean((testdata$shares - predictions_training_testing)^2)
+rsquared_training_testing <- cor(predictions_training_testing, testdata$shares)^2
+mae_training_testing <- mean(abs(testdata$shares - predictions_training_testing))
+mape_training_testing <- mean(abs((testdata$shares - predictions_training_testing) / testdata$shares)) * 100
+mpe_training_testing <- mean((testdata$shares - predictions_training_testing) / testdata$shares) * 100
+
+mse_cv <- if (!is.null(predictions_cv)) mean((testdata$shares - predictions_cv)^2) else NA
+rsquared_cv <- if (!is.null(predictions_cv)) cor(predictions_cv, testdata$shares)^2 else NA
+mae_cv <- if (!is.null(predictions_cv)) mean(abs(testdata$shares - predictions_cv)) else NA
+mape_cv <- if (!is.null(predictions_cv)) mean(abs((testdata$shares - predictions_cv) / testdata$shares)) * 100 else NA
+mpe_cv <- if (!is.null(predictions_cv)) mean((testdata$shares - predictions_cv) / testdata$shares) * 100 else NA
+
+mse_bootstrapping <- if (!is.null(predictions_bootstrapping)) mean((testdata$shares - predictions_bootstrapping)^2) else NA
+rsquared_bootstrapping <- if (!is.null(predictions_bootstrapping)) cor(predictions_bootstrapping, testdata$shares)^2 else NA
+mae_bootstrapping <- if (!is.null(predictions_bootstrapping)) mean(abs(testdata$shares - predictions_bootstrapping)) else NA
+mape_bootstrapping <- if (!is.null(predictions_bootstrapping)) mean(abs((testdata$shares - predictions_bootstrapping) / testdata$shares)) * 100 else NA
+mpe_bootstrapping <- if (!is.null(predictions_bootstrapping)) mean((testdata$shares - predictions_bootstrapping) / testdata$shares) * 100 else NA
+
+# Displaying the performance metrics for each model
+cat("Performance Metrics Comparison\n")
+cat("\n")
+cat("Model\t\tMSE\t\tR-squared\tMAE\t\tMAPE\t\tMPE\n")
+cat("\n")
+cat("Training/Testing\t", mse_training_testing, "\t", rsquared_training_testing, "\t", mae_training_testing, "\t", mape_training_testing, "%\t", mpe_training_testing, "%\n")
+cat("Cross-Validation\t", mse_cv, "\t", rsquared_cv, "\t", mae_cv, "\t", mape_cv, "%\t", mpe_cv, "%\n")
+cat("Bootstrapping\t\t", mse_bootstrapping, "\t", rsquared_bootstrapping, "\t", mae_bootstrapping, "\t", mape_bootstrapping, "%\t", mpe_bootstrapping, "%\n")
+cat("\n")
+############# Implementing Task 3 (Fifth)
+# Plotting the performance  (predicted vs. actual data) for all best models
+
+# Function to plot predicted vs. actual data
+plot_predicted_actual <- function(actual, predicted, model_name) {
+  plot(actual, predicted, main = paste("Predicted vs. Actual (", model_name, ")"), 
+       xlab = "Actual", ylab = "Predicted", col = "blue")
+  abline(0, 1, col = "red")  # Adding a diagonal line for reference
+}
+# Plotting for training/testing paradigm
+plot_predicted_actual(testdata$shares, predictions_training_testing, "Training/Testing")
+
+# Plotting for cross-validation paradigm if available
+if (!is.null(predictions_cv)) {
+  plot_predicted_actual(testdata$shares, predictions_cv, "Cross-Validation")
+}
+# Plotting for bootstrapping paradigm if available
+if (!is.null(predictions_bootstrapping)) {
+  plot_predicted_actual(testdata$shares, predictions_bootstrapping, "Bootstrapping")
+}
+# Adding a legend
+legend("bottomright", legend = c("Actual vs. Predicted", "Ideal"), col = c("blue", "red"), lty = 1, cex = 0.8)
+
+# Adding grid
+grid()
+```
